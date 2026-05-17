@@ -107,6 +107,10 @@ public class VsModSkygridSystem : ModSystem
     /// <summary>Pending chests awaiting BE spawn + loot fill on the main tick. Last field = retry count.</summary>
     private readonly ConcurrentQueue<(BlockPos pos, int tierIdx, int tableIdx, int retries)> _pendingChests = new();
 
+    /// <summary>Players whose starter basket couldn't be placed at PlayerJoin (chunk not ready) —
+    /// retried on the game tick until SetBlock takes.</summary>
+    private readonly ConcurrentQueue<IServerPlayer> _pendingStarterChests = new();
+
     /// <summary>Per-tier counters for diagnostic logging.</summary>
     private int[] _tierEnqueued = Array.Empty<int>();
     private int[] _tierPlaced = Array.Empty<int>();
@@ -722,6 +726,15 @@ public class VsModSkygridSystem : ModSystem
 
     private void DrainPendingChests(float dt)
     {
+        // Retry deferred starter chests for players whose chunk wasn't ready at PlayerJoin.
+        // Re-enqueues on miss until the chunk is writable; bails permanently if the player left.
+        int starterBudget = 8;
+        while (starterBudget-- > 0 && _pendingStarterChests.TryDequeue(out var p))
+        {
+            if (p.ConnectionState != EnumClientState.Playing) continue;
+            if (!TryPlaceStarterChest(p)) _pendingStarterChests.Enqueue(p);
+        }
+
         int budget = 32;
         while (budget-- > 0 && _pendingChests.TryDequeue(out var pending))
         {
@@ -867,29 +880,29 @@ public class VsModSkygridSystem : ModSystem
 
     private void OnPlayerJoin(IServerPlayer player)
     {
-        // Place a reedchest with starter loot on first join. Use tier-0 block id.
         if (_tierBlockIds.Length == 0 || _tierBlockIds[0] == 0) return;
-
-        var key = SpawnChestKeyPrefix + player.PlayerUID;
-        var saved = _sapi.WorldManager.SaveGame.GetData(key);
+        var saved = _sapi.WorldManager.SaveGame.GetData(SpawnChestKeyPrefix + player.PlayerUID);
         if (saved != null && saved.Length > 0 && saved[0] != 0) return;
+        // Attempt now; if the player's chunk isn't yet writable, the tick listener retries.
+        if (!TryPlaceStarterChest(player)) _pendingStarterChests.Enqueue(player);
+    }
 
-        var p = player.Entity.Pos;
+    private bool TryPlaceStarterChest(IServerPlayer player)
+    {
+        var p = player.Entity?.Pos;
+        if (p == null) return false;
         var chestPos = new BlockPos((int)Math.Floor(p.X) + 1, (int)Math.Floor(p.Y), (int)Math.Floor(p.Z), 0);
         var ba = _sapi.World.BlockAccessor;
+        if (ba.GetChunkAtBlockPos(chestPos) == null) return false;
+
         ba.SetBlock(_tierBlockIds[0], chestPos);
-        var be = ba.GetBlockEntity(chestPos);
-        if (be is BlockEntityContainer container)
-        {
-            FillFromTable(container, chestPos, SkygridLoot.StarterChest);
-            _sapi.WorldManager.SaveGame.StoreData(key, new byte[] { 1 });
-            player.SendMessage(GlobalConstants.GeneralChatGroup,
-                "Welcome to Skygrid. A starter basket has been placed next to you.",
-                EnumChatType.Notification);
-        }
-        else
-        {
-            _sapi.Logger.Warning($"[skygrid] spawn basket BE missing at {chestPos}; will retry on next join.");
-        }
+        if (ba.GetBlockEntity(chestPos) is not BlockEntityContainer container) return false;
+
+        FillFromTable(container, chestPos, SkygridLoot.StarterChest);
+        _sapi.WorldManager.SaveGame.StoreData(SpawnChestKeyPrefix + player.PlayerUID, new byte[] { 1 });
+        player.SendMessage(GlobalConstants.GeneralChatGroup,
+            "Welcome to Skygrid. A starter basket has been placed next to you. Translocator gates ~250 blocks out lead to the lazaret and the resonance archive.",
+            EnumChatType.Notification);
+        return true;
     }
 }

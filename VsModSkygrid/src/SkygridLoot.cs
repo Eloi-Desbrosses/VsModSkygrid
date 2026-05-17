@@ -42,23 +42,42 @@ internal static class SkygridLoot
     private static readonly LootTable SurvivalStarter = new()
     {
         Name = "Survival Starter",
-        MinPicks = 5, MaxPicks = 8,
+        // Basket = 8 slots. Min 6 = 2/3 full so early-game players always find a real food cache.
+        MinPicks = 6, MaxPicks = 8,
         Pool = new LootEntry[]
         {
-            new("log-grown-oak-ud",     4, 8),
-            new("log-grown-birch-ud",   4, 8),
-            new("log-grown-pine-ud",    4, 8),
+            // Food first — heaviest stacks so the basket sustains the player a few days before
+            // rotting and turning to mold. Raw veggies dominate to force quick consumption.
+            new("vegetable-carrot",     8, 16),
+            new("vegetable-onion",      8, 16),
+            new("vegetable-parsnip",    8, 16),
+            new("vegetable-turnip",     8, 16),
+            new("vegetable-cabbage",    4, 8),
+            new("legume-soybean",       8, 16),
+            new("redmeat-raw",          4, 8),
+            new("bushmeat-raw",         4, 8),
+            new("bread-spelt-perfect",  4, 8),
+            new("salt",                 4, 8),
+            // Wood — early-game crafting + fuel (tools, firepit, planks).
+            new("log-grown-oak-ud",     8, 16),
+            new("log-grown-birch-ud",   8, 16),
+            new("log-grown-pine-ud",    8, 16),
+            new("log-grown-maple-ud",   4, 8),
+            new("stick",                8, 16),
+            new("planks-aged-ud",       4, 8),
+            // Clay — pots, bricks, kilns, vessels (crockable food storage).
+            new("clay-blue",            8, 16),
+            new("clay-red",             8, 16),
+            new("clay-fire",            4, 8),
+            // Reed-family roots — cattail/papyrus tubers (edible), rope crafting input.
+            new("cattailroot",          4, 8),
+            new("papyrusroot",          4, 8),
+            // Other utility (lower-qty: food wins the slot lottery in most rolls).
             new("soil-low-none",        8, 16),
-            new("soil-medium-none",     6, 12),
             new("treeseed-oak",         2, 4),
-            new("treeseed-birch",       2, 4),
-            new("treeseed-pine",        2, 4),
             new("seeds-flax",           2, 4),
             new("seeds-carrot",         2, 4),
             new("flint",                4, 8),
-            new("stick",                4, 8),
-            new("vegetable-carrot",             2, 4),
-            new("vegetable-onion",              2, 4),
         }
     };
 
@@ -88,20 +107,47 @@ internal static class SkygridLoot
     private static readonly LootTable FoodCache = new()
     {
         Name = "Food Cache",
-        MinPicks = 6, MaxPicks = 10,
+        // Chest = 16 slots. Min 12 = 75% full of food. Pool has 18+ entries so distinct picks always
+        // succeed up to MaxPicks=16. Bumped weight so chests roll FoodCache more often — early-game
+        // survival relies on this stockpile while ferments/farms are being set up.
+        Weight = 2.5,
+        MinPicks = 12, MaxPicks = 16,
         Pool = new LootEntry[]
         {
-            new("vegetable-carrot",             4, 8),
-            new("vegetable-onion",              4, 8),
-            new("vegetable-parsnip",            4, 8),
-            new("vegetable-turnip",             4, 8),
-            new("vegetable-cabbage",            2, 6),
-            new("legume-soybean",       4, 8),
-            new("redmeat-raw",          2, 4),
-            new("salt",                 4, 8),
-            new("fat",                  4, 8),
-            new("hide-raw-medium",      2, 4),
-            new("bread-spelt-perfect",  2, 4),
+            // Vegetables (raw, will rot)
+            new("vegetable-carrot",      16, 32),
+            new("vegetable-onion",       16, 32),
+            new("vegetable-parsnip",     16, 32),
+            new("vegetable-turnip",      16, 32),
+            new("vegetable-cabbage",     8, 16),
+            new("vegetable-pumpkin",     4, 8),
+            // Legumes & cereals
+            new("legume-soybean",        16, 32),
+            new("grain-rice",            16, 32),
+            new("grain-spelt",           16, 32),
+            new("grain-flax",            8, 16),
+            // Meats (raw — fastest rot)
+            new("redmeat-raw",           8, 16),
+            new("bushmeat-raw",          8, 16),
+            new("poultry-raw",           8, 16),
+            new("fish-raw",              8, 16),
+            // Cooked / preserved (last longer)
+            new("bread-spelt-perfect",   8, 16),
+            new("bread-rye-perfect",     4, 8),
+            new("bread-flax-perfect",    4, 8),
+            // Foraged & fruits
+            new("mushroom-fieldmushroom-normal", 4, 8),
+            new("mushroom-kingbolete-normal",    4, 8),
+            new("fruit-blueberry",       8, 16),
+            new("fruit-cranberry",       8, 16),
+            new("fruit-redapple",        4, 8),
+            // Preserved (slower rot — keeps the chest useful past the raw-food window)
+            new("pickledvegetable-carrot",  4, 8),
+            new("pickledvegetable-onion",   4, 8),
+            new("pickledvegetable-cabbage", 4, 8),
+            new("salt",                  8, 16),
+            new("fat",                   8, 16),
+            new("hide-raw-medium",       2, 4),
         }
     };
 
