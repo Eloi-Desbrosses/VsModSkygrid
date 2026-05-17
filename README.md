@@ -18,7 +18,7 @@ vintage's story structures, now floating as preserved islands.
 | ----------------------- | -------------- | ---------------------------------------------------------- |
 | Grid spacing            | 4              | One block every 4 blocks on each axis. Three air gaps between. |
 | Vertical band           | Y = 30 … 250   | Below the band is solid void floor, above it is open sky.  |
-| Containers per column   | 1 … 8          | Every generated chunk-column hosts at least one container. |
+| Containers per column   | 1 … 16         | Every generated chunk-column hosts at least one container. |
 | Loot scaling cap        | 5 000 blocks   | Per-table pick count scales 1.0× near spawn to 2.0× past this distance. |
 
 ### Palette balance — three pools
@@ -106,7 +106,7 @@ the gate lands on a real grid cell.
 
 ## Container tiers
 
-Each chunk-column rolls 1 to 8 containers. Each container picks a tier (with
+Each chunk-column rolls 1 to 16 containers. Each container picks a tier (with
 distance-weighted bias toward higher tiers far from spawn), then picks one
 loot table from that tier.
 

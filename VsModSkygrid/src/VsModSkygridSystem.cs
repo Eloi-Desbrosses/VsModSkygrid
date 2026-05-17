@@ -22,7 +22,7 @@ public class VsModSkygridSystem : ModSystem
     /// <summary>Every generated chunk-column hosts at least one bonus container.</summary>
     public const double ChestChancePerColumn = 1.0;
     /// <summary>If a column rolls chests, how many it can host (1..MaxChestsPerColumn).</summary>
-    public const int MaxChestsPerColumn = 8;
+    public const int MaxChestsPerColumn = 16;
 
     /// <summary>Horizontal distance (blocks) from spawn at which item-count multiplier hits its cap.</summary>
     public const double LootScaleCapDistance = 5000.0;
