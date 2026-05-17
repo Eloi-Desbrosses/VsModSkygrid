@@ -1,0 +1,11 @@
+services:
+  build:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vsmod-skygrid-build:latest
+    volumes:
+      - ./VsModSkygrid:/src/VsModSkygrid
+      - ./build:/out
+    working_dir: /src/VsModSkygrid
+    command: dotnet build VsModSkygrid.csproj -c Release -o /out --nologo
