@@ -18,7 +18,7 @@ vintage's story structures, now floating as preserved islands.
 | ----------------------- | -------------- | ---------------------------------------------------------- |
 | Grid spacing            | 4              | One block every 4 blocks on each axis. Three air gaps between. |
 | Vertical band           | Y = 30 … 250   | Below the band is solid void floor, above it is open sky.  |
-| Containers per column   | 1 … 16         | Every generated chunk-column hosts at least one container. |
+| Containers per column   | 1 … 128        | Every generated chunk-column hosts at least one container. |
 | Loot scaling cap        | 5 000 blocks   | Per-table pick count scales 1.0× near spawn to 2.0× past this distance. |
 
 ### Palette balance — three pools
@@ -28,9 +28,9 @@ without you constantly hitting a fence or a flower.
 
 | Pool         | Selection criteria                                         | Roll chance |
 | ------------ | ---------------------------------------------------------- | ----------- |
-| Navigable    | FullCube **or** SolidTop, non-liquid                       | **80 %**    |
+| Navigable    | FullCube **or** SolidTop, non-liquid                       | **87 %**    |
 | Decorative   | Partial collision **or** NoCollision non-liquid (fences, plants, deco) | 10 %        |
-| Liquid       | Water / lava / saltwater / rapidwater / boilingwater (still-7 source variant only) | 10 %        |
+| Liquid       | Water / lava / saltwater / rapidwater / boilingwater (still-7 source variant only) | 3 %         |
 
 Filtered out entirely: entity-class blocks, creative-mod blocks
 (`creativeblock*`, `creativeglow*`, `creativelight*`, …), `-raw` ore variants,
@@ -106,7 +106,7 @@ the gate lands on a real grid cell.
 
 ## Container tiers
 
-Each chunk-column rolls 1 to 16 containers. Each container picks a tier (with
+Each chunk-column rolls 1 to 128 containers. Each container picks a tier (with
 distance-weighted bias toward higher tiers far from spawn), then picks one
 loot table from that tier.
 

@@ -22,7 +22,7 @@ public class VsModSkygridSystem : ModSystem
     /// <summary>Every generated chunk-column hosts at least one bonus container.</summary>
     public const double ChestChancePerColumn = 1.0;
     /// <summary>If a column rolls chests, how many it can host (1..MaxChestsPerColumn).</summary>
-    public const int MaxChestsPerColumn = 16;
+    public const int MaxChestsPerColumn = 128;
 
     /// <summary>Horizontal distance (blocks) from spawn at which item-count multiplier hits its cap.</summary>
     public const double LootScaleCapDistance = 5000.0;
@@ -36,7 +36,7 @@ public class VsModSkygridSystem : ModSystem
     public const int DecorativeChancePercent = 10;
     /// <summary>Probability a grid cell uses a liquid (water/lava/etc.). Treated like decorative — a
     /// small accent rather than the bulk of the grid. Remaining fraction goes to the navigable pool.</summary>
-    public const int LiquidChancePercent = 10;
+    public const int LiquidChancePercent = 3;
 
     private const int ChunkSize = GlobalConstants.ChunkSize;
     private const string SpawnChestKeyPrefix = "vsmodskygrid.spawnchest.";
@@ -76,12 +76,75 @@ public class VsModSkygridSystem : ModSystem
     private ICoreServerAPI _sapi = null!;
     /// <summary>Full kept pool (after EntityClass/creative/-raw/Unplaceable filters). Used by DumpPalette and as union for splitting.</summary>
     private List<int> _pool = new();
-    /// <summary>FullCube + SolidTop, no liquids. Picked by ~(100-DecorativeChancePercent-LiquidChancePercent)% of grid cells.</summary>
-    private List<int> _navigablePool = new();
+    /// <summary>FullCube + SolidTop, no liquids. Picked by ~(100-DecorativeChancePercent-LiquidChancePercent)% of grid cells.
+    /// Each entry is a variant group (ore-* codes with the same canonical mineral collapse to one
+    /// group whose elements are the host-rock/grade variants — chosen randomly per placement).</summary>
+    private List<int[]> _navigableGroups = new();
     /// <summary>Partial collision + non-liquid NoCollision (fences, plants, deco). Picked by ~DecorativeChancePercent% of cells.</summary>
-    private List<int> _decorativePool = new();
+    private List<int[]> _decorativeGroups = new();
     /// <summary>Liquids only (water/lava/saltwater/rapidwater/boilingwater). Picked by ~LiquidChancePercent% of cells.</summary>
-    private List<int> _liquidPool = new();
+    private List<int[]> _liquidGroups = new();
+    /// <summary>Family-name → number of leading dash-segments to retain in the canonical key for
+    /// cosmetic-only block families. Everything past the Nth segment is treated as
+    /// orientation/cardinal/state/cosmetic-index and collapsed. Picked from per-family variant
+    /// counts in the palette dump where variants differ only visually (same gameplay).</summary>
+    private static readonly Dictionary<string, int> CosmeticGroupKeepSegments = new()
+    {
+        // Fences/gates — single block visually × wood/orientation/state
+        { "drystonefence",                1 },
+        { "woodenfence",                  2 }, { "woodenfencegate",              2 },
+        { "roughhewnfence",               2 }, { "roughhewnfencegate",           2 },
+        // Roofing — material variants worth keeping, orientation cosmetic
+        { "slantedroofing",               2 }, { "slantedroofingbottom",         2 },
+        { "slantedroofingcornerinner",    2 }, { "slantedroofingcornerouter",    2 },
+        { "slantedroofinghalfleft",       2 }, { "slantedroofinghalfright",      2 },
+        { "slantedroofingridge",          2 }, { "slantedroofingridgeend",       2 },
+        { "slantedroofingridgehalfleft",  2 }, { "slantedroofingridgehalfright", 2 },
+        { "slantedroofingtip",            2 }, { "slantedroofingtop",            2 },
+        // Stairs — keep rock/wood/clay-color, drop orientation
+        { "cobblestonestairs",            2 }, { "stonebrickstairs",             2 },
+        { "brickstairs",                  2 }, { "plankstairs",                  2 },
+        { "clayshinglestairs",            2 },
+        // Slabs — same as stairs
+        { "cobblestoneslab",              2 }, { "polishedrockslab",             2 },
+        { "stonebrickslab",               2 }, { "brickslabs",                   2 },
+        { "plankslab",                    2 }, { "clayshinglelabs",              2 },
+        { "glassslab",                    2 },
+        // Ground (rock × cosmetic index)
+        { "gravel",                       2 }, { "sand",                         2 },
+        { "looseboulders",                2 }, { "looseflints",                  2 },
+        { "loosestones",                  2 },
+        // Other architectural
+        { "cobblestonefan",               2 }, { "metalsheet",                   2 },
+        { "brickcourse",                  1 }, { "palisadewall",                 1 },
+        { "multiblock",                   2 }, { "caveart",                      2 },
+        { "stalagsection",                2 }, { "metalblock",                   2 },
+        // Logs — keep state+wood, drop orientation
+        { "log",                          3 }, { "logquad",                      3 },
+        { "logsection",                   3 }, { "carvedlog",                    3 },
+        { "debarkedlog",                  2 },
+        // Planks family — keep wood, drop orientation
+        { "planks",                       2 }, { "burnedplanks",                 3 },
+        { "agedwallpaperplanks",          2 },
+        // Daub — keep color, drop state
+        { "daub",                         2 },
+        // Pure cosmetic indices / textures
+        { "devastatedsoil",               1 }, { "dirtygravel",                  2 },
+        // Decorative
+        { "crystal",                      3 }, { "coral",                        2 },
+        { "painting",                     2 }, { "symbols",                      2 },
+        { "door",                         2 }, { "ladder",                       2 },
+        { "oillamp",                      2 },
+    };
+
+    /// <summary>Families whose pattern is "{family}-{state}-{species}" (state in the middle,
+    /// meaningful axis at the end). Canonical key = "{family}-{last_segment}" so density variations
+    /// collapse but species stay distinct.</summary>
+    private static readonly HashSet<string> CosmeticGroupKeepFamilyAndLast = new()
+    {
+        "leaves",        // leaves-grown-oak, leaves-grown1-oak, ... → leaves-oak
+        "leavesbranchy", // same shape as leaves
+    };
     private long _seedXor;
 
     /// <summary>BlockId for each tier (parallel array to <see cref="SkygridLoot.Tiers"/>).</summary>
@@ -146,10 +209,13 @@ public class VsModSkygridSystem : ModSystem
         // (~17 sec for 50 chunks at 3/tick × 2s tick interval) so worldgen queue stays responsive.
         _sapi.Event.RegisterGameTickListener(dt => _gates?.TickRetry(dt), 2000);
 
+        int navVariants = _navigableGroups.Sum(g => g.Length);
+        int decVariants = _decorativeGroups.Sum(g => g.Length);
+        int liqVariants = _liquidGroups.Sum(g => g.Length);
         _sapi.Logger.Notification(
-            $"[skygrid] ready. pool={_pool.Count} (navigable={_navigablePool.Count}, " +
-            $"decorative={_decorativePool.Count} @ {DecorativeChancePercent}%, " +
-            $"liquid={_liquidPool.Count} @ {LiquidChancePercent}%) " +
+            $"[skygrid] ready. pool={_pool.Count} groups: navigable={_navigableGroups.Count}({navVariants}v), " +
+            $"decorative={_decorativeGroups.Count}({decVariants}v) @ {DecorativeChancePercent}%, " +
+            $"liquid={_liquidGroups.Count}({liqVariants}v) @ {LiquidChancePercent}% — " +
             $"spacing={Spacing} band=[{MinY}..{MaxY}] containers=1..{MaxChestsPerColumn}/col");
         for (int i = 0; i < SkygridLoot.Tiers.Length; i++)
         {
@@ -321,8 +387,123 @@ public class VsModSkygridSystem : ModSystem
         fullCubeCodes.Sort(StringComparer.Ordinal);
         foreach (var c in fullCubeCodes) sb.AppendLine(c);
 
+        sb.AppendLine();
+        sb.AppendLine("## 4. Variant groups (size >= 2) — single palette slot per group, variant chosen at placement");
+        sb.AppendLine();
+        DumpGroupsSection(sb, "navigable", _navigableGroups);
+        DumpGroupsSection(sb, "decorative", _decorativeGroups);
+        DumpGroupsSection(sb, "liquid", _liquidGroups);
+
+        DumpPlacementSimulation(sb);
+        DumpContainerSimulation(sb);
+
         File.WriteAllText(outPath, sb.ToString());
         _sapi.Logger.Notification($"[skygrid] palette dump written to {outPath}  ({_pool.Count} blocks, {fullCubeCodes.Count} FullCube)");
+    }
+
+    private void DumpGroupsSection(StringBuilder sb, string label, List<int[]> groups)
+    {
+        var multi = groups.Where(g => g.Length >= 2).ToList();
+        int singles = groups.Count - multi.Count;
+        int variantsInMulti = multi.Sum(g => g.Length);
+        sb.AppendLine($"### {label}: {groups.Count} groups total ({singles} singletons + {multi.Count} multi-groups covering {variantsInMulti} variants)");
+        sb.AppendLine();
+        foreach (var g in multi.OrderByDescending(x => x.Length))
+        {
+            var codes = g.Select(id => _sapi.World.Blocks[id]?.Code?.ToShortString() ?? $"<id {id}>").OrderBy(x => x, StringComparer.Ordinal).ToList();
+            sb.AppendLine($"  [{g.Length}] {codes[0]}");
+            for (int i = 1; i < codes.Count; i++) sb.AppendLine($"       {codes[i]}");
+        }
+        sb.AppendLine();
+    }
+
+    /// <summary>Synthesizes a large sample of <see cref="PickBlock"/> calls and tallies the result
+    /// distribution. The simulation is deterministic per world seed (same as actual placement) so
+    /// the counts faithfully predict what worldgen will scatter. Useful for spotting families that
+    /// remain over-represented after grouping — they show up as the heaviest entries in the dump.</summary>
+    private void DumpPlacementSimulation(StringBuilder sb)
+    {
+        // 400×400×60 block sample → 100×100×15 = 150 000 grid cells (negligible time).
+        const int SimRadius = 200, SimVertical = 60;
+        var counts = new Dictionary<int, long>();
+        for (int x = -SimRadius; x < SimRadius; x += Spacing)
+        for (int z = -SimRadius; z < SimRadius; z += Spacing)
+        for (int y = MinY; y < MinY + SimVertical; y += Spacing)
+        {
+            int id = PickBlock(x, y, z);
+            counts.TryGetValue(id, out var n);
+            counts[id] = n + 1;
+        }
+        long total = counts.Values.Sum();
+        sb.AppendLine($"## 5. Placement simulation — {total:N0} synthetic PickBlock samples over {SimRadius * 2}×{SimRadius * 2}×{SimVertical} blocks");
+        sb.AppendLine("#    count   pct%  block-code");
+        sb.AppendLine();
+        var rows = counts
+            .Select(kv => (id: kv.Key, count: kv.Value, code: _sapi.World.Blocks[kv.Key]?.Code?.ToShortString() ?? $"<id {kv.Key}>"))
+            .ToList();
+        sb.AppendLine($"### 5a. By count (descending) — {rows.Count} distinct blocks placed");
+        sb.AppendLine();
+        foreach (var r in rows.OrderByDescending(x => x.count))
+        {
+            double pct = 100.0 * r.count / total;
+            sb.AppendLine($"  {r.count,8:N0}  {pct,5:F2}  {r.code}");
+        }
+        sb.AppendLine();
+        sb.AppendLine("### 5b. By name (alphabetical) — same data, easier to scan for non-grouped families");
+        sb.AppendLine();
+        foreach (var r in rows.OrderBy(x => x.code, StringComparer.Ordinal))
+        {
+            double pct = 100.0 * r.count / total;
+            sb.AppendLine($"  {r.count,8:N0}  {pct,5:F2}  {r.code}");
+        }
+        sb.AppendLine();
+    }
+
+    /// <summary>Simulates the per-column container picker across a range of chunk-columns at
+    /// several distance bands from spawn, tallying tier frequencies. Reports the share of grid
+    /// cells occupied by bonus containers (all tiers combined) and the per-tier breakdown.</summary>
+    private void DumpContainerSimulation(StringBuilder sb)
+    {
+        // Sample 5000 chunk-columns at 4 distance bands (0, 500, 1500, 3000 blocks from spawn).
+        // Each band uses the same seed sequence so cross-band comparison reflects only the
+        // distance-weighted tier picker, not RNG variance.
+        var bands = new[] { 0.0, 500.0, 1500.0, 3000.0 };
+        const int ColsPerBand = 5000;
+        int firstY = MinY + GameMath.Mod(-MinY, Spacing);
+        int yBuckets = (MaxY - firstY) / Spacing + 1;
+        int cellsPerColumn = (ChunkSize / Spacing) * (ChunkSize / Spacing) * yBuckets;
+
+        sb.AppendLine($"## 6. Bonus container distribution");
+        sb.AppendLine($"#    Per column: 1..{MaxChestsPerColumn} containers, avg {(1 + MaxChestsPerColumn) / 2.0}");
+        sb.AppendLine($"#    Cells per column: {cellsPerColumn:N0}  ({ChunkSize / Spacing}×{ChunkSize / Spacing}×{yBuckets})");
+        sb.AppendLine();
+        sb.AppendLine("  distance   total-chests  per-col   % of cells   tier-shares-of-chests");
+        foreach (var d in bands)
+        {
+            var tierCount = new long[SkygridLoot.Tiers.Length];
+            long totalChests = 0;
+            var rng = new Random(unchecked((int)_seedXor) ^ (int)d);
+            for (int i = 0; i < ColsPerBand; i++)
+            {
+                int desired = 1 + rng.Next(MaxChestsPerColumn);
+                for (int j = 0; j < desired; j++)
+                {
+                    int tier = SkygridLoot.PickTier(rng, d);
+                    tierCount[tier]++;
+                    totalChests++;
+                }
+            }
+            double perCol = (double)totalChests / ColsPerBand;
+            double cellPct = 100.0 * totalChests / ((double)cellsPerColumn * ColsPerBand);
+            var shares = new List<string>();
+            for (int t = 0; t < SkygridLoot.Tiers.Length; t++)
+            {
+                double tp = totalChests == 0 ? 0 : 100.0 * tierCount[t] / totalChests;
+                shares.Add($"{SkygridLoot.Tiers[t].Name}={tp:F1}%");
+            }
+            sb.AppendLine($"  d={d,5:F0}b   {totalChests,12:N0}   {perCol,6:F2}   {cellPct,8:F3}%   {string.Join("  ", shares)}");
+        }
+        sb.AppendLine();
     }
 
     private static int[] ResolveTierBlockIds(ICoreServerAPI api)
@@ -581,9 +762,12 @@ public class VsModSkygridSystem : ModSystem
         // Per-column bonus container placement: every generated chunk-column gets at least one.
         long colHash = ColumnHash(chunkX, chunkZ);
         var colRng = new Random(unchecked((int)(colHash ^ (colHash >>> 32))));
-        int chestCount = 0;
-        Span<(int xi, int zi, int yi, int tierIdx, int tableIdx)> chestCells = stackalloc (int, int, int, int, int)[MaxChestsPerColumn];
         int yBuckets = (maxY - firstY) / Spacing + 1;
+        int gridSide = ChunkSize / Spacing;
+        // cellChest[i] encodes (tier+1) | (table<<8); 0 = no chest. Indexed by (yi*gridSide + zi)*gridSide + xi.
+        // Replaces a linear scan over a 128-entry chestCells span (~225k comparisons/column at
+        // MaxChestsPerColumn=128) with O(1) lookup per cell. yBuckets*64 ints ≈ 14 KB on stack.
+        Span<int> cellChest = stackalloc int[yBuckets * gridSide * gridSide];
         double distanceFromSpawn = DistanceFromSpawn(worldX0, worldZ0);
 
         int desired = 1 + colRng.Next(MaxChestsPerColumn);
@@ -592,10 +776,13 @@ public class VsModSkygridSystem : ModSystem
             int tierIdx = SkygridLoot.PickTier(colRng, distanceFromSpawn);
             if (_tierBlockIds[tierIdx] == 0) continue;
             int tableIdx = SkygridLoot.PickTable(SkygridLoot.Tiers[tierIdx], colRng);
-            int cx = colRng.Next(ChunkSize / Spacing);
-            int cz = colRng.Next(ChunkSize / Spacing);
+            int cx = colRng.Next(gridSide);
+            int cz = colRng.Next(gridSide);
             int cy = colRng.Next(Math.Max(1, yBuckets));
-            chestCells[chestCount++] = (cx, cz, cy, tierIdx, tableIdx);
+            int cellIdx = (cy * gridSide + cz) * gridSide + cx;
+            // First-write-wins to match the old linear-scan break-on-first-match semantics.
+            if (cellChest[cellIdx] != 0) continue;
+            cellChest[cellIdx] = (tierIdx + 1) | (tableIdx << 8);
         }
 
         int xi = 0, zi = 0, yi;
@@ -613,20 +800,11 @@ public class VsModSkygridSystem : ModSystem
                     int dz = wz - worldZ0;
                     int idx = (ChunkSize * lY + dz) * ChunkSize + dx;
 
-                    int matchedTier = -1, matchedTable = -1;
-                    for (int k = 0; k < chestCount; k++)
+                    int packed = cellChest[(yi * gridSide + zi) * gridSide + xi];
+                    if (packed != 0)
                     {
-                        var c = chestCells[k];
-                        if (c.xi == xi && c.zi == zi && c.yi == yi)
-                        {
-                            matchedTier = c.tierIdx;
-                            matchedTable = c.tableIdx;
-                            break;
-                        }
-                    }
-
-                    if (matchedTier >= 0)
-                    {
+                        int matchedTier = (packed & 0xFF) - 1;
+                        int matchedTable = (packed >> 8) & 0xFF;
                         chunks[chunkY].Data.SetBlockUnsafe(idx, 0);
                         _pendingChests.Enqueue((new BlockPos(wx, wy, wz, 0), matchedTier, matchedTable, 0));
                         System.Threading.Interlocked.Increment(ref _tierEnqueued[matchedTier]);
@@ -681,22 +859,71 @@ public class VsModSkygridSystem : ModSystem
     /// </summary>
     private void SplitPoolByNavigability()
     {
-        _navigablePool = new List<int>();
-        _decorativePool = new List<int>();
-        _liquidPool = new List<int>();
+        var navByKey = new Dictionary<string, List<int>>();
+        var decByKey = new Dictionary<string, List<int>>();
+        var liqByKey = new Dictionary<string, List<int>>();
+        _navigableGroups = new List<int[]>();
+        _decorativeGroups = new List<int[]>();
+        _liquidGroups = new List<int[]>();
         foreach (var id in _pool)
         {
             var b = _sapi.World.Blocks[id];
             if (b == null) continue;
             bool isLiquid = b.BlockMaterial == EnumBlockMaterial.Water
                          || b.BlockMaterial == EnumBlockMaterial.Lava;
-            if (isLiquid) { _liquidPool.Add(id); continue; }
-            var sol = ClassifySolidity(b);
-            if (sol == Solidity.FullCube || sol == Solidity.SolidTop)
-                _navigablePool.Add(id);
+            Dictionary<string, List<int>> targetKey;
+            List<int[]> targetSingletons;
+            if (isLiquid) { targetKey = liqByKey; targetSingletons = _liquidGroups; }
             else
-                _decorativePool.Add(id);
+            {
+                var sol = ClassifySolidity(b);
+                bool nav = sol == Solidity.FullCube || sol == Solidity.SolidTop;
+                targetKey = nav ? navByKey : decByKey;
+                targetSingletons = nav ? _navigableGroups : _decorativeGroups;
+            }
+            var key = CanonicalOreKey(b) ?? CanonicalCosmeticKey(b);
+            if (key == null)
+            {
+                targetSingletons.Add(new[] { id });
+                continue;
+            }
+            if (!targetKey.TryGetValue(key, out var list)) targetKey[key] = list = new List<int>();
+            list.Add(id);
         }
+        foreach (var kv in navByKey) _navigableGroups.Add(kv.Value.ToArray());
+        foreach (var kv in decByKey) _decorativeGroups.Add(kv.Value.ToArray());
+        foreach (var kv in liqByKey) _liquidGroups.Add(kv.Value.ToArray());
+    }
+
+    /// <summary>Canonical mineral key for ore-* and looseores-* blocks. Uses the VS SDK's parsed
+    /// variant dictionary instead of re-parsing the path, which means we don't need a hard-coded
+    /// rock-suffix table or grade-prefix list.</summary>
+    private static string? CanonicalOreKey(Block block)
+    {
+        if (block.Code == null) return null;
+        var family = block.FirstCodePart();
+        var mineral = family == "ore"       ? block.Variant["type"]
+                    : family == "looseores" ? block.Variant["ore"]
+                    : null;
+        return mineral == null ? null : family + "-" + mineral;
+    }
+
+    /// <summary>Canonical cosmetic group key for a block whose family is registered in
+    /// <see cref="CosmeticGroupKeepSegments"/> (keep first N segments) or
+    /// <see cref="CosmeticGroupKeepFamilyAndLast"/> (keep family + last segment). Returns null
+    /// when the family isn't registered or the path is too short to collapse.</summary>
+    private static string? CanonicalCosmeticKey(Block block)
+    {
+        if (block.Code == null) return null;
+        var family = block.FirstCodePart();
+        if (family == null) return null;
+        var parts = block.Code.Path.Split('-');
+        if (CosmeticGroupKeepFamilyAndLast.Contains(family))
+        {
+            return parts.Length < 3 ? null : family + "-" + parts[^1];
+        }
+        if (!CosmeticGroupKeepSegments.TryGetValue(family, out var keep)) return null;
+        return parts.Length <= keep ? null : string.Join('-', parts, 0, keep);
     }
 
     private int PickBlock(int x, int y, int z)
@@ -706,18 +933,20 @@ public class VsModSkygridSystem : ModSystem
         h ^= h >>> 33; h *= -4265267296991594537L;
         h ^= h >>> 33;
         ulong u = (ulong)h;
-        // Low 100-bucket selects category (deterministic per worldseed × pos). Upper bits pick the
-        // index inside the chosen pool — independent because splitmix64 avalanches every input bit.
+        // Low 100-bucket selects category (deterministic per worldseed × pos). Mid bits pick the
+        // group inside the chosen pool, top bits pick the variant inside the group — independent
+        // because splitmix64 avalanches every input bit.
         ulong bucket = u % 100UL;
-        List<int> pool;
-        if (bucket < (ulong)LiquidChancePercent && _liquidPool.Count > 0)
-            pool = _liquidPool;
-        else if (bucket < (ulong)(LiquidChancePercent + DecorativeChancePercent) && _decorativePool.Count > 0)
-            pool = _decorativePool;
+        List<int[]> groups;
+        if (bucket < (ulong)LiquidChancePercent && _liquidGroups.Count > 0)
+            groups = _liquidGroups;
+        else if (bucket < (ulong)(LiquidChancePercent + DecorativeChancePercent) && _decorativeGroups.Count > 0)
+            groups = _decorativeGroups;
         else
-            pool = _navigablePool;
-        if (pool.Count == 0) pool = _pool; // safety fallback if a partition came up empty
-        return pool[(int)((u / 100UL) % (ulong)pool.Count)];
+            groups = _navigableGroups;
+        if (groups.Count == 0) return _pool[(int)((u / 100UL) % (ulong)_pool.Count)]; // safety
+        var group = groups[(int)((u / 100UL) % (ulong)groups.Count)];
+        return group[(int)((u >> 40) % (ulong)group.Length)];
     }
 
     // ─────────────────────────────────────────────────────────────────────────

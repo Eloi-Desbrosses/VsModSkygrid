@@ -4,7 +4,7 @@
   "name": "Skygrid",
   "authors": ["Spinnn"],
   "description": "Port of the iconic Minecraft Skygrid worldgen to Vintage Story 1.22.2. The world is a 3D grid of random blocks separated by air. The 5 vanilla story structures are preserved as vintage islands and linked to spawn by a network of translocator gates. Server-only — players don't need to install anything.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "side": "server",
   "dependencies": {
     "game": "1.22.2"
